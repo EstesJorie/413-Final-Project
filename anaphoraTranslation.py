@@ -15,6 +15,11 @@ logFile = "logFile.log"
 if not os.path.exists(logFile):
     print(f"Log file '{logFile}' does not exist, creating a new one.\n")
 
+if not os.path.exists('OUTPUT'):
+    os.makedirs('OUTPUT')
+    print("Created OUTPUT directory")
+    logging.info("Created OUTPUT directory.")
+
 logging.basicConfig(filename= logFile,
                     filemode = 'a', #append log file, DO NOT SET to 'w' 
                     format = '%(asctime)s - %(levelname)s - %(message)s',
