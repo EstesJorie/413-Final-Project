@@ -118,15 +118,22 @@ def setPipeline(size):
     try:
         nlp = spacy.load(f"en_core_web_{size}")
         
-        # Add sentencizer before coreferee
-        if 'sentencizer' not in nlp.pipe_names:
+        if 'sentencizer' not in nlp.pipe_names: #add sentencizer
             nlp.add_pipe('sentencizer', before='parser')
             logging.info(f"Added sentencizer to {size} model pipeline")
         
-        # Add coreferee after parser
-        if 'coreferee' not in nlp.pipe_names:
+        if 'coreferee' not in nlp.pipe_names: #add coreferee
             nlp.add_pipe('coreferee', after='parser')
             logging.info(f"Added Coreferee to {size} model pipeline")
+        
+        logging.info(f"Pipeline components for {size}: {nlp.pipe_names}") #pipeline verification
+        
+        testText = "John went to the store. He bought some milk." #pipeline test
+        doc = nlp(testText)
+        if doc._.coref_chains:
+            logging.info(f"Coreferee test successful for {size} model")
+        else:
+            logging.warning(f"Coreferee test failed for {size} model")
             
         return nlp
     except Exception as e:
@@ -145,7 +152,7 @@ for modelName, nlp in spacyModels.items():
     print(f"Processing with {modelName.upper()} model")
     print(f"{'='*50}")
     
-    outputFile = f"OUTPUT/Output_{modelName}.csv"
+    outputFile = f"OUTPUT/OUTPUT_{modelName}.csv"
     
     # Add description with model size
     desc = f"SpaCy {modelName.upper()} model"
