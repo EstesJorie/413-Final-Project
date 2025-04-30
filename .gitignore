@@ -172,3 +172,11 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+TMX/
+*.jpg
+*.jpeg
+*.png
+*.pptx
+*.tmx
+*.log
