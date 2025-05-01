@@ -215,11 +215,14 @@ def batchProcess(texts, nlp, lang="en", batchSize=30, sentence_window=4):
 
     return pd.DataFrame(data)
 
-def groupSentences(sentences, blockSize=25, sentence_window=8):
-    """Group sentences into larger blocks based on a given sentence window."""
+def groupSentences(sentences, sentence_window=8):
+    """Group sentences into overlapping blocks to maintain context."""
     groupedSentences = []
-    for i in range(0, len(sentences), sentence_window):  #group by sentence window
-        groupedSentences.append(" ".join(sentences[i:i+sentence_window]))
+    for i in range(0, len(sentences)):
+        start = max(0, i - sentence_window)
+        end = min(len(sentences), i + sentence_window + 1)
+        group = sentences[start:end]
+        groupedSentences.append(" ".join(group))
     return groupedSentences
 
 
@@ -266,11 +269,11 @@ def main():
                 
                 df = None
                 if modelName.startswith("en"):
-                    groupedEN = groupSentences(enSentences, blockSize=25)
-                    df = batchProcess(groupedEN, nlp, lang="en", batchSize=40)
+                    groupedEN = groupSentences(enSentences, sentence_window=4)
+                    df = batchProcess(groupedEN, nlp, lang="en", batchSize=20)  
                 elif modelName.startswith("fr"):
-                    groupedFR = groupSentences(frSentences, blockSize=25)
-                    df = batchProcess(groupedFR, nlp, lang="fr", batchSize=40)                
+                    groupedFR = groupSentences(frSentences, sentence_window=4)  
+                    df = batchProcess(groupedFR, nlp, lang="fr", batchSize=20)        
                 if df is None:
                     logger.error(f"Failed to process data with model {modelName}")
                     continue
