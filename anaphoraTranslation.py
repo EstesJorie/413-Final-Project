@@ -78,6 +78,61 @@ def parseTMX(filePath):
 V1enSentences, V1frSentences = parseTMX(V1filePath)
 print(f"Complete!")
 
+def setPipeline(size):
+    try:
+        # Load SpaCy model
+        nlp = spacy.load(f"en_core_web_{size}")
+        logging.info(f"Loaded {size} model")
+        
+        if 'sentencizer' not in nlp.pipe_names:
+            nlp.add_pipe('sentencizer', first=True)  
+            logging.info(f"Added sentencizer to {size} model")
+        
+        # Remove existing coreferee if present
+        if 'coreferee' in nlp.pipe_names:
+            nlp.remove_pipe('coreferee')
+        
+        # Add coreferee with specific configuration
+        nlp.add_pipe('coreferee')
+        logging.info(f"Added Coreferee to {size} model")
+        
+        test_text = "John went to the store. He bought milk."
+        doc = nlp(test_text)
+        
+        if not hasattr(doc._, 'coref_chains'):
+            logging.error(f"Coreferee not properly initialized in {size} model")
+            return None
+        
+        # Safe access to coref chains
+        if doc._.coref_chains:
+            for chain in docBatch._.coref_chains:
+                try:
+                    mentions = []
+                    for mention in chain:
+                        start, end = mention
+                        if 0 <= start <= end < len(docBatch):
+                            span = docBatch[start:end+1]
+                            mentions.append(f"{span.text} ({span.start}:{span.end})")
+                    if mentions:
+                        doc_coref_chains.append(f"({', '.join(mentions)})")
+                except IndexError as e:
+                    logging.warning(f"Index error in chain: {str(e)}")
+                    continue
+        
+        return nlp
+            
+    except Exception as e:
+        logging.error(f"Error in pipeline setup for {size} model: {str(e)}")
+        return None
+
+spacyModels = {}
+for size in ["sm", "md", "lg"]:
+    nlp = setPipeline(size)
+    if nlp is not None:
+        spacyModels[size] = nlp
+        print(f"Loaded model: en_core_web_{size}")
+        logging.info(f"Loaded model: en_core_web_{size}")
+
 def batchProcess(texts, nlp, batchSize=15):
     """Processing texts in batches with coreferee support"""
     data = {
@@ -114,74 +169,6 @@ def batchProcess(texts, nlp, batchSize=15):
                 gc.collect()
                 
     return pd.DataFrame(data)
-
-def setPipeline(size):
-    try:
-        # Load SpaCy model
-        nlp = spacy.load(f"en_core_web_{size}")
-        logging.info(f"Loaded {size} model")
-        
-        # Add sentencizer first
-        if 'sentencizer' not in nlp.pipe_names:
-            nlp.add_pipe('sentencizer', before='parser')
-            logging.info(f"Added sentencizer to {size} model")
-        
-        # Remove coreferee if exists
-        if 'coreferee' in nlp.pipe_names:
-            nlp.remove_pipe('coreferee')
-        
-        # Add coreferee after parser
-        nlp.add_pipe('coreferee')
-        logging.info(f"Added Coreferee to {size} model")
-        
-        # Test coreferee functionality with more robust test
-        test_texts = [
-            "John went to the store. He bought some milk.",
-            "The cat sat on the mat. It was comfortable.",
-            "Mary told Susan that she would help her."
-        ]
-        
-        for test_text in test_texts:
-            doc = nlp(test_text)
-            if not hasattr(doc._, 'coref_chains'):
-                logging.error(f"Coreferee attributes missing in {size} model")
-                continue
-                
-            if doc._.coref_chains:
-                try:
-                    chains = []
-                    for chain in doc._.coref_chains:
-                        mentions = []
-                        for mention in chain:
-                            if mention[0] < len(doc) and mention[1] < len(doc):
-                                span = doc[mention[0]:mention[1]+1]
-                                mentions.append(span.text)
-                        if mentions:
-                            chains.append(mentions)
-                    
-                    if chains:
-                        logging.info(f"Coreferee test successful for {size} model with text: {test_text}")
-                        logging.info(f"Found chains: {chains}")
-                        return nlp
-                except IndexError as e:
-                    logging.warning(f"Index error in {size} model: {str(e)}")
-                    continue
-        
-        # If we get here, no test was successful
-        logging.warning(f"No successful coreference tests for {size} model")
-        return nlp  # Return the model anyway for further testing
-            
-    except Exception as e:
-        logging.error(f"Error setting up {size} model pipeline: {str(e)}")
-        return None
-
-spacyModels = {}
-for size in ["sm", "md", "lg"]:
-    nlp = setPipeline(size)
-    if nlp is not None:
-        spacyModels[size] = nlp
-        print(f"Loaded model: en_core_web_{size}")
-        logging.info(f"Loaded model: en_core_web_{size}")
 
 for modelName, nlp in spacyModels.items():
     print(f"\n{'='*50}")
