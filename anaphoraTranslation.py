@@ -79,8 +79,7 @@ V1enSentences, V1frSentences = parseTMX(V1filePath)
 print(f"Complete!")
 
 def batchProcess(texts, nlp, batchSize=15):
-    """Processing texts in batches"""
-   # Initialize lists to store data
+    """Processing texts in batches with coreferee support"""
     data = {
         'Original_Sentence': [],
         'Tokens': [],
@@ -88,54 +87,69 @@ def batchProcess(texts, nlp, batchSize=15):
         'Coreference': []
     }
 
+    # Enable only necessary components
     with nlp.select_pipes(enable=['sentencizer', 'parser', 'coreferee', 'ner']):
         for docBatch in tqdm(list(nlp.pipe(texts, batch_size=batchSize)), desc="Processing batches"):
-            if not docBatch.has_annotation("SENT_START"): #MAKE SURE sentence boundaries are set! 
-                nlp.get_pipe('sentencizer')(docBatch)
-                
+            # Process coreference at document level first
+            doc_coref_chains = []
+            if hasattr(docBatch._, 'coref_chains') and docBatch._.coref_chains is not None:
+                for chain in docBatch._.coref_chains:
+                    try:
+                        mentions = []
+                        for mention in chain:
+                            span = docBatch[mention[0]:mention[1]+1]
+                            mentions.append(f"{span.text} ({span.start}:{span.end})")
+                        doc_coref_chains.append(f"({', '.join(mentions)})")
+                    except IndexError:
+                        continue
+            
+            # Process sentences
             for sent in docBatch.sents:
                 data['Original_Sentence'].append(sent.text)
                 data['Tokens'].append(", ".join(token.text for token in sent))
                 data['Named_Entities'].append(", ".join(f"{ent.text} ({ent.label_})" for ent in sent.ents))
-                
-                # Process coreference chains
-                coref_chains = []
-                if hasattr(docBatch._, 'coref_chains') and docBatch._.coref_chains is not None:
-                    for chain in docBatch._.coref_chains:
-                        try:
-                            mentions = [docBatch[mention[0]:mention[1]+1].text for mention in chain]
-                            coref_chains.append(f"({', '.join(mentions)})")
-                        except IndexError:
-                            continue
-                data['Coreference'].append("; ".join(coref_chains))
-                
+                data['Coreference'].append("; ".join(doc_coref_chains))
+            
             if len(data['Original_Sentence']) % 10000 == 0:
                 gc.collect()
                 
-        return pd.DataFrame(data)
+    return pd.DataFrame(data)
 
 def setPipeline(size):
     try:
+        # Load SpaCy model
         nlp = spacy.load(f"en_core_web_{size}")
         
-        if 'sentencizer' not in nlp.pipe_names: #add sentencizer
+        # Add sentencizer first
+        if 'sentencizer' not in nlp.pipe_names:
             nlp.add_pipe('sentencizer', before='parser')
-            logging.info(f"Added sentencizer to {size} model pipeline")
+            logging.info(f"Added sentencizer to {size} model")
         
-        if 'coreferee' not in nlp.pipe_names: #add coreferee
-            nlp.add_pipe('coreferee', after='parser')
-            logging.info(f"Added Coreferee to {size} model pipeline")
-        
-        logging.info(f"Pipeline components for {size}: {nlp.pipe_names}") #pipeline verification
-        
-        testText = "John went to the store. He bought some milk." #pipeline test
-        doc = nlp(testText)
-        if doc._.coref_chains:
-            logging.info(f"Coreferee test successful for {size} model")
-        else:
-            logging.warning(f"Coreferee test failed for {size} model")
+        # Remove coreferee if it exists (to ensure clean setup)
+        if 'coreferee' in nlp.pipe_names:
+            nlp.remove_pipe('coreferee')
             
-        return nlp
+        # Add coreferee after parser
+        nlp.add_pipe('coreferee')
+        logging.info(f"Added Coreferee to {size} model")
+        
+        # Test coreferee functionality
+        testText = "John went to the store. He bought some milk."
+        doc = nlp(testText)
+        
+        if hasattr(doc._, 'coref_chains') and doc._.coref_chains is not None:
+            chains = [[(mention[0], mention[1], doc[mention[0]:mention[1]+1].text) 
+                      for mention in chain] for chain in doc._.coref_chains]
+            if chains:
+                logging.info(f"Coreferee test successful for {size} model. Found chains: {chains}")
+                return nlp
+            else:
+                logging.warning(f"Coreferee loaded but found no chains in test text for {size} model")
+                return nlp
+        else:
+            logging.error(f"Coreferee attributes not found in {size} model")
+            return None
+            
     except Exception as e:
         logging.error(f"Error setting up {size} model pipeline: {str(e)}")
         return None
@@ -146,6 +160,7 @@ for size in ["sm", "md", "lg"]:
     if nlp is not None:
         spacyModels[size] = nlp
         print(f"Loaded model: en_core_web_{size}")
+        logging.info(f"Loaded model: en_core_web_{size}")
 
 for modelName, nlp in spacyModels.items():
     print(f"\n{'='*50}")
@@ -154,9 +169,8 @@ for modelName, nlp in spacyModels.items():
     
     outputFile = f"OUTPUT/OUTPUT_{modelName}.csv"
     
-    # Add description with model size
     desc = f"SpaCy {modelName.upper()} model"
-    df = batchProcess(V1enSentences, nlp, batchSize=15)
+    df = batchProcess(V1enSentences, nlp, batchSize=10)
     
     df['Model'] = modelName
     df.to_csv(outputFile, index=False)
@@ -165,7 +179,6 @@ for modelName, nlp in spacyModels.items():
     print(f"Total sentences processed: {len(df)}")
     print(f"Sentences with coreferences: {len(df[df['Coreference'].str.len() > 0])}")
     print(f"Sentences with named entities: {len(df[df['Named_Entities'].str.len() > 0])}")
-    print(f"Output saved to: {outputFile}")
     print(f"{'='*50}\n")
     
     logging.info(f"Finished processing with {modelName} model. Output: {outputFile}")
