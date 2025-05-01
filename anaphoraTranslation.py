@@ -29,11 +29,10 @@ logging.basicConfig(filename= logFile,
                     datefmt='%Y-%m-%d %H:%M:%S')
 print(f"Logging initialized. Check {logFile} for details.\n")
 
-V1filePath = "TMX/en-frv1.tmx"
-
-if not os.path.exists(V1filePath):
-    logging.error(f"File '{V1filePath}' does not exist.")
-    raise FileNotFoundError(f"File '{V1filePath}' does not exist.")
+tmxFiles = {
+    "V1" : "TMX/en-frv1.tmx",
+    "V2016" : "TMX/en-frv2016.tmx"
+}
 
 def parseTMX(filePath):
     tree = ET.parse(filePath) #parse TMX file
@@ -76,10 +75,6 @@ def parseTMX(filePath):
     print(f"\nParsed {len(en_texts)} parallel sentences")
     logging.info(f"Parsed {len(en_texts)} parallel sentences")
     return en_texts, fr_texts
-
-V1enSentences, V1frSentences = parseTMX(V1filePath)
-print(f"Complete!")
-
 
 def setPipeline(size):
     try:
@@ -147,7 +142,7 @@ def batchProcess(texts, nlp, batchSize=30):
     }
 
     with nlp.select_pipes(enable=['sentencizer', 'parser', 'coreferee', 'ner']):
-        for docBatch in tqdm(list(nlp.pipe(texts, batch_size=batchSize)), desc="Processing batches"):
+        for docBatch in tqdm(list(nlp.pipe(texts, batch_size=batchSize, n_process=mp.cpu_count())), desc="Processing batches"):
             doc_coref_chains = []
 
             if hasattr(docBatch._, 'coref_chains') and docBatch._.coref_chains is not None:
@@ -179,26 +174,33 @@ def batchProcess(texts, nlp, batchSize=30):
                 gc.collect()
 
     return pd.DataFrame(data)
+for fileLabel, filePath in tmxFiles.items():
+    if not os.path.exists(filePath):
+        logging.error(f"File '{filePath}' does not exist.")
+        continue
 
-for modelName, nlp in spacyModels.items():
-    print(f"\n{'='*50}")
-    print(f"Processing with {modelName.upper()} model")
-    print(f"{'='*50}")
-    
-    outputFile = f"OUTPUT/OUTPUT_{modelName}.csv"
-    
-    desc = f"SpaCy {modelName.upper()} model"
-    df = batchProcess(V1enSentences, nlp, batchSize=10)
-    
-    df['Model'] = modelName
-    df.to_csv(outputFile, index=False)
-    
-    print(f"\nStatistics for {modelName.upper()} model:")
-    print(f"Total sentences processed: {len(df)}")
-    print(f"Sentences with coreferences: {len(df[df['Coreference'].str.len() > 0])}")
-    print(f"Sentences with named entities: {len(df[df['Named_Entities'].str.len() > 0])}")
-    print(f"{'='*50}\n")
-    
-    logging.info(f"Finished processing with {modelName} model. Output: {outputFile}")
+    enSentences, frSentences = parseTMX(tmxFiles)
+    print(f"Files Parsed!")
+    logging.info("TMX files successfully parsed")
+
+    for modelName, nlp in spacyModels.items():
+            print(f"\n{'='*50}")
+            print(f"Processing {fileLabel} with {modelName.upper()} model")
+            print(f"{'='*50}")
+            
+            outputFile = f"OUTPUT/OUTPUT_{fileLabel}_{modelName}.csv"
+            
+            df = batchProcess(enSentences, nlp, batchSize=35)
+            df['Model'] = modelName
+            df['TMX_File'] = fileLabel
+            df.to_csv(outputFile, index=False)
+
+            print(f"\nStatistics for {fileLabel} - {modelName.upper()} model:")
+            print(f"Total sentences processed: {len(df)}")
+            print(f"Sentences with coreferences: {len(df[df['Coreference'].str.len() > 0])}")
+            print(f"Sentences with named entities: {len(df[df['Named_Entities'].str.len() > 0])}")
+            print(f"{'='*50}\n")
+            
+            logging.info(f"Finished processing {fileLabel} with {modelName} model. Output: {outputFile}")
     
 print("\nAll models processed successfully!")
