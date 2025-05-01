@@ -137,7 +137,7 @@ for size in ["sm", "md", "lg"]:
         print(f"Loaded model: en_core_web_{size}")
         logging.info(f"Loaded model: en_core_web_{size}")
 
-def batchProcess(texts, nlp, batchSize=15):
+def batchProcess(texts, nlp, batchSize=30):
     """Processing texts in batches with coreferee"""
     data = {
         'Original_Sentence': [],
