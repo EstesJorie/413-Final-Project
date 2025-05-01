@@ -190,7 +190,10 @@ def batchProcess(texts, nlp, lang="en", batchSize=30, sentence_window=4):
             doc = nlp(combined_text) #process each block wth spacy
 
             coref_chains = doc._.coref_chains if hasattr(doc._, 'coref_chains') else [] #assign coreference to indiviudal sentences
-            sent_idx = 0  #sentence position index 
+            if coref_chains:
+                logger.debug(f"Detected {len(coref_chains)} coreference chains in batch")
+                for chain in coref_chains[:3]:
+                    logger.debug(" → ".join([mention.text for mention in chain]))
             
             for sent in doc.sents:
                 tokens = ", ".join(token.text for token in sent)
@@ -213,7 +216,7 @@ def batchProcess(texts, nlp, lang="en", batchSize=30, sentence_window=4):
 
     return pd.DataFrame(data)
 
-def groupSentences(sentences, blockSize=8):
+def groupSentences(sentences, blockSize=25):
     return [" ".join(sentences[i:i+blockSize]) for i in range(0, len(sentences), blockSize)]
 
 
@@ -260,11 +263,11 @@ def main():
                 
                 df = None
                 if modelName.startswith("en"):
-                    groupedEN = groupSentences(enSentences, blockSize=8)
-                    df = batchProcess(groupedEN, nlp, lang="en", batchSize=15)
+                    groupedEN = groupSentences(enSentences, blockSize=25)
+                    df = batchProcess(groupedEN, nlp, lang="en", batchSize=40)
                 elif modelName.startswith("fr"):
-                    groupedFR = groupSentences(frSentences, blockSize=8)
-                    df = batchProcess(groupedFR, nlp, lang="fr", batchSize=15)                
+                    groupedFR = groupSentences(frSentences, blockSize=25)
+                    df = batchProcess(groupedFR, nlp, lang="fr", batchSize=40)                
                 if df is None:
                     logger.error(f"Failed to process data with model {modelName}")
                     continue
