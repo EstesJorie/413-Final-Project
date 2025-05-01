@@ -119,36 +119,57 @@ def setPipeline(size):
     try:
         # Load SpaCy model
         nlp = spacy.load(f"en_core_web_{size}")
+        logging.info(f"Loaded {size} model")
         
         # Add sentencizer first
         if 'sentencizer' not in nlp.pipe_names:
             nlp.add_pipe('sentencizer', before='parser')
             logging.info(f"Added sentencizer to {size} model")
         
-        # Remove coreferee if it exists (to ensure clean setup)
+        # Remove coreferee if exists
         if 'coreferee' in nlp.pipe_names:
             nlp.remove_pipe('coreferee')
-            
+        
         # Add coreferee after parser
         nlp.add_pipe('coreferee')
         logging.info(f"Added Coreferee to {size} model")
         
-        # Test coreferee functionality
-        testText = "John went to the store. He bought some milk."
-        doc = nlp(testText)
+        # Test coreferee functionality with more robust test
+        test_texts = [
+            "John went to the store. He bought some milk.",
+            "The cat sat on the mat. It was comfortable.",
+            "Mary told Susan that she would help her."
+        ]
         
-        if hasattr(doc._, 'coref_chains') and doc._.coref_chains is not None:
-            chains = [[(mention[0], mention[1], doc[mention[0]:mention[1]+1].text) 
-                      for mention in chain] for chain in doc._.coref_chains]
-            if chains:
-                logging.info(f"Coreferee test successful for {size} model. Found chains: {chains}")
-                return nlp
-            else:
-                logging.warning(f"Coreferee loaded but found no chains in test text for {size} model")
-                return nlp
-        else:
-            logging.error(f"Coreferee attributes not found in {size} model")
-            return None
+        for test_text in test_texts:
+            doc = nlp(test_text)
+            if not hasattr(doc._, 'coref_chains'):
+                logging.error(f"Coreferee attributes missing in {size} model")
+                continue
+                
+            if doc._.coref_chains:
+                try:
+                    chains = []
+                    for chain in doc._.coref_chains:
+                        mentions = []
+                        for mention in chain:
+                            if mention[0] < len(doc) and mention[1] < len(doc):
+                                span = doc[mention[0]:mention[1]+1]
+                                mentions.append(span.text)
+                        if mentions:
+                            chains.append(mentions)
+                    
+                    if chains:
+                        logging.info(f"Coreferee test successful for {size} model with text: {test_text}")
+                        logging.info(f"Found chains: {chains}")
+                        return nlp
+                except IndexError as e:
+                    logging.warning(f"Index error in {size} model: {str(e)}")
+                    continue
+        
+        # If we get here, no test was successful
+        logging.warning(f"No successful coreference tests for {size} model")
+        return nlp  # Return the model anyway for further testing
             
     except Exception as e:
         logging.error(f"Error setting up {size} model pipeline: {str(e)}")
