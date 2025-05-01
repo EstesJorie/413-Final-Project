@@ -94,15 +94,15 @@ dependencies:
       - colorlog==6.9.0
       - coreferee==1.4.1
       - coreferee-model-en==1.0.0
-      - en-core-web-lg==3.5.0
-      - en-core-web-md==3.5.0
-      - en-core-web-sm==3.5.0
-      - fr-core-news-lg==3.5.0
-      - fr-core-news-md==3.5.0
-      - fr-core-news-sm==3.5.0
+      - en-core-web-lg==3.2.0
+      - en-core-web-md==3.2.0
+      - en-core-web-sm==3.2.0
+      - fr-core-news-lg==3.2.0
+      - fr-core-news-md==3.2.0
+      - fr-core-news-sm==3.2.0
       - pydantic==1.7.4
-      - spacy==3.5.0
-      - thinc==8.1.12
+      - spacy==3.2.0
+      - thinc==8.0.17
       - typer==0.3.2
       - wasabi==0.10.1
       - weasel==0.4.1
