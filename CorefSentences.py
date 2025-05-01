@@ -1,12 +1,26 @@
 import pandas as pd
 import re
 import spacy
+from transformers import MarianMTModel, MarianTokenizer
+
 
 filePaths = {
     "sm": "OUTPUT/OUTPUT_V1_sm.csv",
     "md": "OUTPUT/OUTPUT_V1_md.csv",
     "lg": "OUTPUT/OUTPUT_V1_lg.csv"
 }
+
+modelName = 'Helsinki-NLP/opus-mt-en-fr'
+tokenizer = MarianTokenizer.from_pretrained(modelName)
+model = MarianMTModel.from_pretrained(modelName)
+
+spacyModels = {}
+for size in ["sm", "md", "lg"]:
+    nlp = setPipeline(size)
+    if nlp is not None:
+        spacyModels[size] = nlp
+        print(f"Loaded model: en_core_web_{size}")
+        logger.info(f"Loaded model: en_core_web_{size}")
 
 def sampleCorefSentences(file_paths, sample_size=100, random_seed=42):
     """
@@ -75,14 +89,25 @@ def resolveCoreference(row, nlp):
 
     return " ".join(token_list)
 
+def translate(texts):
+    inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
+    translated = model.generate(**inputs)
+    return tokenizer.batch_decode(translated, skip_special_tokens=True)
+
 
 samples = sampleCorefSentences(filePaths)
 
 for label, df in samples.items():
     print(f"Resolving coreference in {label.upper()} sample...")
-    
+
+    nlp = spacyModels[label]  
     df['Resolved_Sentence'] = df.apply(lambda row: resolveCoreference(row, nlp), axis=1)
+
+    print(f"Translating {label.upper()} sentences...")
+
+    df['MT_Original'] = translate(df['Original_Sentence'].tolist())
+    df['MT_Resolved'] = translate(df['Resolved_Sentence'].tolist())
     
-    output_path = f"evaluationSample_{label}_resolved.csv"
-    df.to_csv(output_path, index=False)
-    print(f"Saved resolved sentences to {output_path}")
+    outputPath = f"evaluationSample_{label}_translated.csv"
+    df.to_csv(outputPath, index=False)
+    print(f"COMPLETE! Saved to {outputPath}.")
