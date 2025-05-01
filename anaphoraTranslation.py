@@ -174,14 +174,15 @@ def batchProcess(texts, nlp, batchSize=30):
                 gc.collect()
 
     return pd.DataFrame(data)
+
 for fileLabel, filePath in tmxFiles.items():
     if not os.path.exists(filePath):
         logging.error(f"File '{filePath}' does not exist.")
         continue
 
-    enSentences, frSentences = parseTMX(tmxFiles)
-    print(f"Files Parsed!")
-    logging.info("TMX files successfully parsed")
+    enSentences, frSentences = parseTMX(filePath)
+    print(f"{fileLabel} successfully parsed!")
+    logging.info(f"TMX files successfully parsed for {fileLabel}")
 
     for modelName, nlp in spacyModels.items():
             print(f"\n{'='*50}")
