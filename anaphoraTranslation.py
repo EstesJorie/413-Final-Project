@@ -10,12 +10,13 @@ import colorlog
 import multiprocessing as mp
 from multiprocessing import freeze_support
 from itertools import islice
+from functools import partial
 from tqdm import tqdm
 from coreferee.data_model import Mention
 
 
 def setupLogging():
-    """Initialize logging configuration with colors"""
+    """Initialize logging configuration"""
     logFile = "logFile.log"
     
     logger = colorlog.getLogger('anaphora')
@@ -24,14 +25,12 @@ def setupLogging():
     console_handler = colorlog.StreamHandler()
     file_handler = logging.FileHandler(logFile)
     
-    # Set console to WARNING level (will only show warnings and errors)
-    console_handler.setLevel(colorlog.WARNING)
-    # Keep file handler at INFO level for complete logs
-    file_handler.setLevel(colorlog.INFO)
+    console_handler.setLevel(colorlog.WARNING) #warning displayed on console
+    file_handler.setLevel(colorlog.INFO) #info only placed into log file
     
     # Create formatters
     console_format = colorlog.ColoredFormatter(
-        "%(log_color)s%(levelname)s: %(message)s%(reset)s",  # Simplified console format
+        "%(log_color)s%(levelname)s: %(message)s%(reset)s",  
         log_colors={
             'DEBUG':    'cyan',
             'INFO':     'green',
@@ -51,7 +50,7 @@ def setupLogging():
     
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
-    logger.setLevel(colorlog.DEBUG)  # Allow all levels to be processed
+    logger.setLevel(colorlog.DEBUG)  
     
     return logFile, logger
 
@@ -65,7 +64,7 @@ tmxFiles = {
 def parseTMX(filePath):
     """Parse TMX file with memory-efficient iterative parsing"""
     logger.info(f"Starting to parse: {filePath}")
-    print(f"Starting to prase: {filePath}")
+    print(f"Parsing: {filePath}")
     
     context = ET.iterparse(filePath, events=("start", "end"))
     context = iter(context)
@@ -113,55 +112,65 @@ def parseTMX(filePath):
     logger.info(f"Finished parsing {len(en_texts)} parallel sentences")
     return en_texts, fr_texts
 
-def setPipeline(size, lang="en"):
+def setPipeline(size="sm", lang="en"):
     try:
         if lang == "en":
-            nlp = spacy.load(f"en_core_web_{size}")
+            nlp = spacy.load(f"en_core_web_{size}") #load english models
         elif lang == "fr":
-            nlp = spacy.load(f"fr_core_news_{size}")
+            nlp = spacy.load(f"fr_core_news_{size}") #load french models
         else:
-            raise ValueError("Language not supported. Only 'en' and 'fr' are supported.")
+            raise ValueError("Language not supported. Only 'en' and 'fr' are supported.") #error handling
         
         logger.info(f"Initializing {lang} {size} model pipeline")
         
-        if 'sentencizer' not in nlp.pipe_names:
+        if 'sentencizer' not in nlp.pipe_names: #add sentencizer to pipeline
             nlp.add_pipe('sentencizer', first=True)
             logger.info(f"Added sentencizer to {lang} {size} model")
         
-        if 'coreferee' in nlp.pipe_names:
+        if 'coreferee' in nlp.pipe_names: #add coreferee to pipeline
             nlp.remove_pipe('coreferee')
         
-        nlp.add_pipe('coreferee')
+        nlp.add_pipe('coreferee', after='ner')
         logger.info(f"Added Coreferee to {lang} {size} model")
         
-        test_text = "John went to the store. He bought milk." if lang == "en" else "Jean est allé au magasin. Il a acheté du lait."
+        test_text = "John went to the store. He bought milk." if lang == "en" else "Jean est allé au magasin. Il a acheté du lait." #test text to make sure pipeline works
         doc = nlp(test_text)
         
         if not hasattr(doc._, 'coref_chains'):
             logger.error(f"Coreferee not properly initialized in {lang} {size} model")
             return None
 
-        for chain in doc._.coref_chains:
-            try:
-                mentions = []
-                for mention in chain:
-                    if isinstance(mention, Mention):
-                        start_idx = max(0, min(mention.root_index, len(doc) - 1))
-                        end_idx = max(0, min(mention.root_index + 1, len(doc)))
-                        if start_idx < end_idx:
-                            span = doc[start_idx:end_idx]
-                            mentions.append(f"{span.text} ({start_idx}:{end_idx})")
-                    else:
-                        logger.warning(f"Unexpected mention type: {type(mention)} - {mention}")
-                if mentions:
-                    logger.info(f"Coref chain: {', '.join(mentions)}")
-            except Exception as e:
-                logger.error(f"Error processing coreference chain: {str(e)}")
-                continue
+        if hasattr(doc._, 'coref_chains') and doc._.coref_chains: #chain processing
+            chains = []
+            if hasattr(doc._, 'coref_chains') and doc._.coref_chains is not None:
+                try:
+                    chains = [chain for chain in doc._.coref_chains]
+                except TypeError:
+                    logger.warning("Coref chains not iterable")
+            logger.info(f"Found {len(chains)} coreference chain(s).")
+            
+            for chain in chains:
+                try:
+                    mentions = []
+                    for mention in chain:
+                        if isinstance(mention, Mention): #explicitly making sure type is correct
+                            start_idx = max(0, min(mention.root_index, len(doc) - 1))
+                            end_idx = max(0, min(mention.root_index + 1, len(doc)))
+                            if start_idx < end_idx:
+                                span = doc[start_idx:end_idx]
+                                mentions.append(f"{span.text} ({start_idx}:{end_idx})")
+                        else:
+                            logger.warning(f"Unexpected mention type: {type(mention)} - {mention}")
+                    
+                    if mentions:
+                        logger.info(f"Coref chain: {', '.join(mentions)}") #logging chain in mention
+                except Exception as e:
+                    logger.error(f"Error processing coreference chain: {str(e)}")
+                    continue
 
         return nlp
 
-    except Exception as e:
+    except Exception as e: #main error handling
         logger.error(f"Error initializing {size} model: {str(e)}")
         return None
 
@@ -172,45 +181,41 @@ def batchProcess(texts, nlp, lang="en", batchSize=30, sentence_window=4):
         'Tokens': [],
         'Named_Entities': [],
         'Coreference': []
-    }
+    } #cols for dataframe
 
     with nlp.select_pipes(enable=['sentencizer', 'parser', 'coreferee', 'ner']):
         for batch_start in tqdm(range(0, len(texts), batchSize), desc=f"Processing {lang} batches"):
-            # Create a larger block by combining sentences
-            combined_text = " ".join(texts[batch_start: batch_start + batchSize])
+            combined_text = " ".join(texts[batch_start: batch_start + batchSize]) #combine sentences to increase block size
             
-            # Process the combined block with spaCy
-            doc = nlp(combined_text)
+            doc = nlp(combined_text) #process each block wth spacy
 
-            # After processing the combined block, reassign coreference chains to individual sentences
-            coref_chains = doc._.coref_chains if hasattr(doc._, 'coref_chains') else []
-            sent_idx = 0  # Index for keeping track of sentence positions
+            coref_chains = doc._.coref_chains if hasattr(doc._, 'coref_chains') else [] #assign coreference to indiviudal sentences
+            sent_idx = 0  #sentence position index 
             
             for sent in doc.sents:
                 tokens = ", ".join(token.text for token in sent)
                 named_entities = ", ".join(f"{ent.text} ({ent.label_})" for ent in sent.ents)
                 
-                # Initialize coreference string
-                coreference = []
+                coreference = [] #coref string
                 
-                # Check if the sentence contains a coreference chain
-                for chain in coref_chains:
+                for chain in coref_chains: #chceking for coref chain
                     for mention in chain:
-                        # If the sentence contains this mention, we add the chain to the coreference
                         if mention.start >= sent.start and mention.end <= sent.end:
                             coreference.append(f"{mention.text} ({mention.start}:{mention.end})")
                 
-                # Add the data for this sentence to the DataFrame
-                data['Original_Sentence'].append(sent.text)
-                data['Tokens'].append(tokens)
-                data['Named_Entities'].append(named_entities)
-                data['Coreference'].append("; ".join(coreference))
+                data['Original_Sentence'].append(sent.text) #append to data frame
+                data['Tokens'].append(tokens) #append to data frame
+                data['Named_Entities'].append(named_entities) #append to data frame
+                data['Coreference'].append("; ".join(coreference)) #append to data frame
 
-            # Periodic garbage collection for memory efficiency
             if len(data['Original_Sentence']) % 10000 == 0:
                 gc.collect()
 
     return pd.DataFrame(data)
+
+def groupSentences(sentences, blockSize=8):
+    return [" ".join(sentences[i:i+blockSize]) for i in range(0, len(sentences), blockSize)]
+
 
 def main():
     logger.warning("[ALERT] Starting new processing run!")
@@ -220,20 +225,18 @@ def main():
             logger.error(f"TMX file missing: {filePath}")
             continue
         logger.info(f"Found TMX file: {filePath}")
-        file_size = os.path.getsize(filePath) / (1024 * 1024)  # Size in MB
+        file_size = os.path.getsize(filePath) / (1024 * 1024) #file size (MB)
         logger.info(f"File size: {file_size:.2f} MB")
 
     spacyModels = {}
     for size in ["sm", "md", "lg"]:
-        # Load English models
-        nlp_en = setPipeline(size, lang="en")
+        nlp_en = setPipeline(size, lang="en") #load eng
         if nlp_en is not None:
             spacyModels[f"en_{size}"] = nlp_en
             print(f"Loaded model: en_core_web_{size}")
             logger.info(f"Loaded model: en_core_web_{size}")
 
-        # Load French models
-        nlp_fr = setPipeline(size, lang="fr")
+        nlp_fr = setPipeline(size, lang="fr") #load fr
         if nlp_fr is not None:
             spacyModels[f"fr_{size}"] = nlp_fr
             print(f"Loaded model: fr_core_news_{size}")
@@ -255,10 +258,16 @@ def main():
                 
                 outputFile = f"OUTPUT/OUTPUT_{fileLabel}_{modelName}.csv"
                 
+                df = None
                 if modelName.startswith("en"):
-                    df = batchProcess(enSentences, nlp, lang="en", batchSize=35, sentence_window=4)
+                    groupedEN = groupSentences(enSentences, blockSize=8)
+                    df = batchProcess(groupedEN, nlp, lang="en", batchSize=15)
                 elif modelName.startswith("fr"):
-                    df = batchProcess(frSentences, nlp, lang="fr", batchSize=35, sentence_window=4)
+                    groupedFR = groupSentences(frSentences, blockSize=8)
+                    df = batchProcess(groupedFR, nlp, lang="fr", batchSize=15)                
+                if df is None:
+                    logger.error(f"Failed to process data with model {modelName}")
+                    continue
                 
                 df['Model'] = modelName
                 df['TMX_File'] = fileLabel
