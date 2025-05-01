@@ -9,6 +9,8 @@ import gc
 import multiprocessing as mp
 from itertools import islice
 from tqdm import tqdm
+from coreferee.data_model import Mention
+
 
 # Set up logging
 logFile = "logFile.log"
@@ -78,6 +80,7 @@ def parseTMX(filePath):
 V1enSentences, V1frSentences = parseTMX(V1filePath)
 print(f"Complete!")
 
+
 def setPipeline(size):
     try:
         # Load SpaCy model
@@ -85,44 +88,45 @@ def setPipeline(size):
         logging.info(f"Loaded {size} model")
         
         if 'sentencizer' not in nlp.pipe_names:
-            nlp.add_pipe('sentencizer', first=True)  
+            nlp.add_pipe('sentencizer', first=True)
             logging.info(f"Added sentencizer to {size} model")
         
-        # Remove existing coreferee if present
         if 'coreferee' in nlp.pipe_names:
             nlp.remove_pipe('coreferee')
         
-        # Add coreferee with specific configuration
         nlp.add_pipe('coreferee')
         logging.info(f"Added Coreferee to {size} model")
         
+        # Run a test document to validate coreferee is working
         test_text = "John went to the store. He bought milk."
         doc = nlp(test_text)
         
         if not hasattr(doc._, 'coref_chains'):
             logging.error(f"Coreferee not properly initialized in {size} model")
             return None
-        
-        # Safe access to coref chains
-        if doc._.coref_chains:
-            for chain in docBatch._.coref_chains:
-                try:
-                    mentions = []
-                    for mention in chain:
-                        start, end = mention
-                        if 0 <= start <= end < len(docBatch):
-                            span = docBatch[start:end+1]
-                            mentions.append(f"{span.text} ({span.start}:{span.end})")
-                    if mentions:
-                        doc_coref_chains.append(f"({', '.join(mentions)})")
-                except IndexError as e:
-                    logging.warning(f"Index error in chain: {str(e)}")
-                    continue
-        
+
+        for chain in doc._.coref_chains:
+            try:
+                mentions = []
+                for mention in chain:
+                    if isinstance(mention, Mention):
+                        start_idx = max(0, min(mention.root_index, len(doc) - 1))
+                        end_idx = max(0, min(mention.root_index + 1, len(doc)))
+                        if start_idx < end_idx:
+                            span = doc[start_idx:end_idx]
+                            mentions.append(f"{span.text} ({start_idx}:{end_idx})")
+                    else:
+                        logging.warning(f"Unexpected mention type: {type(mention)} - {mention}")
+                if mentions:
+                    logging.info(f"Coref chain: {', '.join(mentions)}")
+            except Exception as e:
+                logging.error(f"Error processing coreference chain: {str(e)}")
+                continue
+
         return nlp
-            
+
     except Exception as e:
-        logging.error(f"Error in pipeline setup for {size} model: {str(e)}")
+        logging.error(f"Error initializing {size} model: {str(e)}")
         return None
 
 spacyModels = {}
@@ -134,7 +138,7 @@ for size in ["sm", "md", "lg"]:
         logging.info(f"Loaded model: en_core_web_{size}")
 
 def batchProcess(texts, nlp, batchSize=15):
-    """Processing texts in batches with coreferee support"""
+    """Processing texts in batches with coreferee"""
     data = {
         'Original_Sentence': [],
         'Tokens': [],
@@ -142,32 +146,38 @@ def batchProcess(texts, nlp, batchSize=15):
         'Coreference': []
     }
 
-    # Enable only necessary components
     with nlp.select_pipes(enable=['sentencizer', 'parser', 'coreferee', 'ner']):
         for docBatch in tqdm(list(nlp.pipe(texts, batch_size=batchSize)), desc="Processing batches"):
-            # Process coreference at document level first
             doc_coref_chains = []
+
             if hasattr(docBatch._, 'coref_chains') and docBatch._.coref_chains is not None:
                 for chain in docBatch._.coref_chains:
                     try:
                         mentions = []
                         for mention in chain:
-                            span = docBatch[mention[0]:mention[1]+1]
-                            mentions.append(f"{span.text} ({span.start}:{span.end})")
-                        doc_coref_chains.append(f"({', '.join(mentions)})")
-                    except IndexError:
+                            if isinstance(mention, Mention):
+                                start_idx = max(0, min(mention.root_index, len(docBatch) - 1))
+                                end_idx = max(0, min(mention.root_index + 1, len(docBatch)))
+                                if start_idx < end_idx:
+                                    span = docBatch[start_idx:end_idx]
+                                    mentions.append(f"{span.text} ({start_idx}:{end_idx})")
+                            else:
+                                logging.warning(f"Unexpected mention type: {type(mention)} - {mention}")
+                        if mentions:
+                            doc_coref_chains.append(f"({', '.join(mentions)})")
+                    except Exception as e:
+                        logging.warning(f"Error processing coref chain: {str(e)}")
                         continue
-            
-            # Process sentences
+
             for sent in docBatch.sents:
                 data['Original_Sentence'].append(sent.text)
                 data['Tokens'].append(", ".join(token.text for token in sent))
                 data['Named_Entities'].append(", ".join(f"{ent.text} ({ent.label_})" for ent in sent.ents))
                 data['Coreference'].append("; ".join(doc_coref_chains))
-            
+
             if len(data['Original_Sentence']) % 10000 == 0:
                 gc.collect()
-                
+
     return pd.DataFrame(data)
 
 for modelName, nlp in spacyModels.items():
