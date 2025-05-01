@@ -181,43 +181,46 @@ def batchProcess(texts, nlp, lang="en", batchSize=30, sentence_window=4):
         'Tokens': [],
         'Named_Entities': [],
         'Coreference': []
-    } #cols for dataframe
+    }
 
     with nlp.select_pipes(enable=['sentencizer', 'parser', 'coreferee', 'ner']):
         for batch_start in tqdm(range(0, len(texts), batchSize), desc=f"Processing {lang} batches"):
-            combined_text = " ".join(texts[batch_start: batch_start + batchSize]) #combine sentences to increase block size
-            
-            doc = nlp(combined_text) #process each block wth spacy
+            # Combine sentences into blocks based on sentence_window
+            combined_text = " ".join(texts[batch_start: batch_start + batchSize])
 
-            coref_chains = doc._.coref_chains if hasattr(doc._, 'coref_chains') else [] #assign coreference to indiviudal sentences
-            if coref_chains:
-                logger.debug(f"Detected {len(coref_chains)} coreference chains in batch")
-                for chain in coref_chains[:3]:
-                    logger.debug(" → ".join([mention.text for mention in chain]))
+            # Split the combined text into individual sentences
+            # This would create a larger window of sentences to process together
+            doc = nlp(combined_text)
+
+            coref_chains = doc._.coref_chains if hasattr(doc._, 'coref_chains') else []
+            sent_idx = 0
             
             for sent in doc.sents:
                 tokens = ", ".join(token.text for token in sent)
                 named_entities = ", ".join(f"{ent.text} ({ent.label_})" for ent in sent.ents)
                 
-                coreference = [] #coref string
-                
-                for chain in coref_chains: #chceking for coref chain
+                coreference = [] # coref string
+                for chain in coref_chains:
                     for mention in chain:
                         if mention.start >= sent.start and mention.end <= sent.end:
                             coreference.append(f"{mention.text} ({mention.start}:{mention.end})")
                 
-                data['Original_Sentence'].append(sent.text) #append to data frame
-                data['Tokens'].append(tokens) #append to data frame
-                data['Named_Entities'].append(named_entities) #append to data frame
-                data['Coreference'].append("; ".join(coreference)) #append to data frame
+                data['Original_Sentence'].append(sent.text)
+                data['Tokens'].append(tokens)
+                data['Named_Entities'].append(named_entities)
+                data['Coreference'].append("; ".join(coreference))
 
             if len(data['Original_Sentence']) % 10000 == 0:
                 gc.collect()
 
     return pd.DataFrame(data)
 
-def groupSentences(sentences, blockSize=25):
-    return [" ".join(sentences[i:i+blockSize]) for i in range(0, len(sentences), blockSize)]
+def groupSentences(sentences, blockSize=25, sentence_window=8):
+    """Group sentences into larger blocks based on a given sentence window."""
+    groupedSentences = []
+    for i in range(0, len(sentences), sentence_window):  #group by sentence window
+        groupedSentences.append(" ".join(sentences[i:i+sentence_window]))
+    return groupedSentences
 
 
 def main():
