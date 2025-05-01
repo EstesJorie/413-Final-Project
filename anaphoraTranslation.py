@@ -18,18 +18,20 @@ def setupLogging():
     """Initialize logging configuration with colors"""
     logFile = "logFile.log"
     
-    # Remove existing handlers to avoid duplicates
-    logger = colorlog.getLogger('anaphora')  # Give logger a name
-    logger.handlers = []  # Clear existing handlers
+    logger = colorlog.getLogger('anaphora')
+    logger.handlers = []
     
-    # Create handlers
     console_handler = colorlog.StreamHandler()
     file_handler = logging.FileHandler(logFile)
     
+    # Set console to WARNING level (will only show warnings and errors)
+    console_handler.setLevel(colorlog.WARNING)
+    # Keep file handler at INFO level for complete logs
+    file_handler.setLevel(colorlog.INFO)
+    
     # Create formatters
     console_format = colorlog.ColoredFormatter(
-        "%(log_color)s%(asctime)s - %(levelname)s - %(message)s%(reset)s",
-        datefmt='%Y-%m-%d %H:%M:%S',
+        "%(log_color)s%(levelname)s: %(message)s%(reset)s",  # Simplified console format
         log_colors={
             'DEBUG':    'cyan',
             'INFO':     'green',
@@ -39,21 +41,18 @@ def setupLogging():
         }
     )
     
-    file_format = colorlog.ColoredFormatter(
+    file_format = logging.Formatter(
         "%(asctime)s - %(levelname)s - %(message)s",
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
-    # Set formatters
     console_handler.setFormatter(console_format)
     file_handler.setFormatter(file_format)
     
-    # Add handlers
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
-    logger.setLevel(colorlog.INFO)
+    logger.setLevel(colorlog.DEBUG)  # Allow all levels to be processed
     
-    logger.info("Logging initialized")  
     return logFile, logger
 
 logFile, logger = setupLogging()
@@ -64,45 +63,54 @@ tmxFiles = {
 }
 
 def parseTMX(filePath):
-    tree = ET.parse(filePath) #parse TMX file
-    root = tree.getroot() #get root element
-    en_texts, fr_texts = [], [] #lists for Eng and French texts
+    """Parse TMX file with memory-efficient iterative parsing"""
+    logger.info(f"Starting to parse: {filePath}")
+    print(f"Starting to prase: {filePath}")
     
-    total_units = sum(1 for _ in root.iter('tu')) #total num units for bar
+    context = ET.iterparse(filePath, events=("start", "end"))
+    context = iter(context)
     
-    for tu in tqdm(root.iter('tu'), total=total_units, desc="Parsing TMX file"):
-        langs, texts = [], [] #lists for languages and texts
-        for tuv in tu.findall('tuv'):
-            lang = tuv.attrib.get('{http://www.w3.org/XML/1998/namespace}lang') or tuv.attrib.get('lang')
-            seg = tuv.find('seg')
-            if lang is None:
-                logger.warning("Language attribute not found in tuv element.")
-                continue
-            if lang and seg is not None and seg.text:
-                langs.append(lang.lower())
-                texts.append(seg.text.strip())
-                logger.info(f"Language: {lang}, Text: {seg.text.strip()}")
-
-        if 'en' in langs and 'fr' in langs:
-            if langs.count('en') > 1 or langs.count('fr') > 1:
-                logger.warning("Multiple entries for the same language found in a single translation unit.")
-                continue
-            if langs.count('en') == 0 or langs.count('fr') == 0:
-                logger.warning("Missing English or French text in a translation unit.")
-                continue
-            if langs.count('en') == 1 and langs.count('fr') == 1:
-                logger.info("Both English and French texts found in a translation unit.")
-            try:
-                enText = texts[langs.index('en')]
-                frText = texts[langs.index('fr')]
-                en_texts.append(enText)
-                fr_texts.append(frText)
-            except (IndexError, ValueError):
-                logger.error("Error retrieving English or French text from the lists.")
-                continue
-
-    print(f"\nParsed {len(en_texts)} parallel sentences")
-    logger.info(f"Parsed {len(en_texts)} parallel sentences")
+    event, root = next(context)
+    
+    en_texts, fr_texts = [], []
+    current_texts = {}
+    
+    logger.info("Counting translation units...")
+    total_units = sum(1 for _, elem in ET.iterparse(filePath) if elem.tag == 'tu')
+    logger.info(f"Found {total_units} translation units")
+    
+    with tqdm(total=total_units, desc="Parsing TMX file") as pbar:
+        for event, elem in context:
+            if event == "end" and elem.tag == "tu":
+                current_texts = {}
+                
+                for tuv in elem.findall('tuv'):
+                    lang = tuv.attrib.get('{http://www.w3.org/XML/1998/namespace}lang') 
+                    lang = lang.lower() if lang else None
+                    
+                    if not lang:
+                        lang = tuv.attrib.get('lang')
+                        lang = lang.lower() if lang else None
+                        
+                    if lang and (lang == 'en' or lang == 'fr'):
+                        seg = tuv.find('seg')
+                        if seg is not None and seg.text:
+                            current_texts[lang] = seg.text.strip()
+                
+                if 'en' in current_texts and 'fr' in current_texts:
+                    en_texts.append(current_texts['en'])
+                    fr_texts.append(current_texts['fr'])
+                
+                # Clear element to free memory
+                elem.clear()
+                pbar.update(1)
+                
+                # Garbage collect periodically
+                if len(en_texts) % 10000 == 0:
+                    root.clear()
+                    gc.collect()
+    
+    logger.info(f"Finished parsing {len(en_texts)} parallel sentences")
     return en_texts, fr_texts
 
 def setPipeline(size):
@@ -197,8 +205,15 @@ def batchProcess(texts, nlp, batchSize=30):
     return pd.DataFrame(data)
 
 def main():
-    logFile = setupLogging()
-    logger.info("[ALERT] Starting new processing run!")
+    logger.warning("[ALERT] Starting new processing run!")
+
+    for fileLabel, filePath in tmxFiles.items():
+        if not os.path.exists(filePath):
+            logger.error(f"TMX file missing: {filePath}")
+            continue
+        logger.info(f"Found TMX file: {filePath}")
+        file_size = os.path.getsize(filePath) / (1024 * 1024)  # Size in MB
+        logger.info(f"File size: {file_size:.2f} MB")
 
     spacyModels = {}
     for size in ["sm", "md", "lg"]:
@@ -219,7 +234,7 @@ def main():
 
         for modelName, nlp in spacyModels.items():
                 print(f"\n{'='*50}")
-                print(f"Processing {fileLabel} with {modelName.upper()} model")
+                print(f"Processing OPUS {fileLabel} with spaCy {modelName.upper()} model")
                 print(f"{'='*50}")
                 
                 outputFile = f"OUTPUT/OUTPUT_{fileLabel}_{modelName}.csv"
