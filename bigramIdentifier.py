@@ -89,15 +89,21 @@ def loadCombineDatasets():
     return x_train_combined, y_train_combined, x_test_combined, y_test_combined
 
 def printMetrics(y_test_decoded, y_pred_decoded, y_pred_prob, languages):
-    # Classification report (Precision, Recall, F1-score, and Support)
+    # Get unique classes from both true and predicted labels
+    unique_classes = np.unique(np.concatenate([y_test_decoded, y_pred_decoded]))
+    
+    # Classification report with explicit labels
     print("Classification Report:")
     print("=" * 50)
-    print(classification_report(y_test_decoded, y_pred_decoded, target_names=languages))
+    print(classification_report(y_test_decoded, y_pred_decoded, 
+                              labels=unique_classes,
+                              target_names=unique_classes))
     
     # Confusion Matrix
     print("\nConfusion Matrix:")
     print("=" * 50)
-    cm = confusion_matrix(y_test_decoded, y_pred_decoded)
+    cm = confusion_matrix(y_test_decoded, y_pred_decoded, 
+                         labels=unique_classes)
     print(cm)
 
     # Matthews Correlation Coefficient (MCC)
@@ -106,21 +112,26 @@ def printMetrics(y_test_decoded, y_pred_decoded, y_pred_prob, languages):
     print("=" * 50)
     print(f"MCC: {mcc:.4f}")
     
-    # Log-Loss
-    loss_value = log_loss(y_test_decoded, y_pred_prob)
-    print("\nLog-Loss:")
-    print("=" * 50)
-    print(f"Log-Loss: {loss_value:.4f}")
+    # Log-Loss with explicit labels
+    try:
+        loss_value = log_loss(y_test_decoded, y_pred_prob,
+                            labels=unique_classes)
+        print("\nLog-Loss:")
+        print("=" * 50)
+        print(f"Log-Loss: {loss_value:.4f}")
+    except ValueError as e:
+        print("\nWarning: Could not calculate log loss:", str(e))
 
-    # ROC AUC (if applicable, for multi-class classification you need to compute for each class)
+    # ROC AUC with explicit labels
     print("\nROC AUC Scores:")
     print("=" * 50)
-    for i in range(len(languages)):
+    for i, label in enumerate(unique_classes):
         try:
-            auc = roc_auc_score(y_test_decoded == i, y_pred_prob[:, i])
-            print(f"Class {languages[i]}: AUC = {auc:.4f}")
+            auc = roc_auc_score(y_test_decoded == label, 
+                              y_pred_prob[:, i])
+            print(f"Class {label}: AUC = {auc:.4f}")
         except ValueError as e:
-            print(f"Class {languages[i]}: AUC = nan")
+            print(f"Class {label}: AUC = nan")
 
 def orderResults(y_test_decoded, y_pred_decoded, label_encoder, languages, metric='f1-score'):
     # Generate the classification report
@@ -237,12 +248,14 @@ def plotTopClasses(y_test_decoded, y_pred_decoded, label_encoder, languages, met
     plt.close()
 
 def plotClassDistribution(y_train, y_test, label_encoder, output_dir):
-    # Count the occurrences of each class
-    train_class_counts = pd.Series(y_train).value_counts().sort_index()
-    test_class_counts = pd.Series(y_test).value_counts().sort_index()
+    # Convert to pandas Series and get value counts
+    train_class_counts = pd.Series(y_train).value_counts()
+    test_class_counts = pd.Series(y_test).value_counts()
     
-    class_labels = label_encoder.classes_
-
+    # Get all unique classes in sorted order
+    all_classes = sorted(set(y_train) | set(y_test))
+    
+    # Create figure
     fig, axes = plt.subplots(2, 1, figsize=(20, 12), dpi=300)
     
     bar_params = {
@@ -252,50 +265,34 @@ def plotClassDistribution(y_train, y_test, label_encoder, output_dir):
         'linewidth': 0.5
     }
     
-    # Plot for training data
-    train_bars = axes[0].bar(train_class_counts.index, train_class_counts.values, 
+    # Plot training data
+    train_bars = axes[0].bar(range(len(all_classes)), 
+                            [train_class_counts.get(c, 0) for c in all_classes],
                             color='skyblue', **bar_params)
     axes[0].set_title('Class Distribution in Training Data', 
                      pad=20, fontsize=14, fontweight='bold')
     axes[0].set_xlabel('Language', labelpad=10, fontsize=12)
     axes[0].set_ylabel('Number of Samples', labelpad=10, fontsize=12)
-    axes[0].set_xticks(train_class_counts.index)
-    axes[0].set_xticklabels(class_labels[train_class_counts.index], 
-                           rotation=45, ha='right')
+    axes[0].set_xticks(range(len(all_classes)))
+    axes[0].set_xticklabels(all_classes, rotation=45, ha='right')
     
+    # Add value labels on training bars
     for bar in train_bars:
         height = bar.get_height()
         axes[0].text(bar.get_x() + bar.get_width()/2., height,
                     f'{int(height):,}',
                     ha='center', va='bottom', fontsize=8)
     
-    # Plot for testing data
-    test_bars = axes[1].bar(test_class_counts.index, test_class_counts.values, 
+    # Plot test data
+    test_bars = axes[1].bar(range(len(all_classes)), 
+                           [test_class_counts.get(c, 0) for c in all_classes],
                            color='lightcoral', **bar_params)
     axes[1].set_title('Class Distribution in Test Data', 
                      pad=20, fontsize=14, fontweight='bold')
     axes[1].set_xlabel('Language', labelpad=10, fontsize=12)
     axes[1].set_ylabel('Number of Samples', labelpad=10, fontsize=12)
-    axes[1].set_xticks(test_class_counts.index)
-    axes[1].set_xticklabels(class_labels[test_class_counts.index], 
-                           rotation=45, ha='right')
-    
-    for bar in test_bars:
-        height = bar.get_height()
-        axes[1].text(bar.get_x() + bar.get_width()/2., height,
-                    f'{int(height):,}',
-                    ha='center', va='bottom', fontsize=8)
-    
-    for ax in axes:
-        ax.grid(True, axis='y', linestyle='--', alpha=0.7)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-    plt.tight_layout()
-    
-    fig.savefig(os.path.join(output_dir, 'class_distribution.png'),
-                dpi=300, bbox_inches='tight', pad_inches=0.5)
-    plt.close(fig)
+    axes[1].set_xticks(range(len(all_classes)))
+    axes[1].set_xticklabels(all_classes, rotation=45, ha='right')
 
 def plotMisclassifiedSamples(x_test, y_test_decoded, y_pred_decoded, output_dir, num_samples=10):
     # Find misclassified samples
@@ -333,6 +330,8 @@ def plotMisclassifiedSamples(x_test, y_test_decoded, y_pred_decoded, output_dir,
                             dpi=300)
     if len(samples) == 1:
         axes = [axes]
+
+    fontFamily = setupFonts()
     
     for i, (sample, ax) in enumerate(zip(samples, axes)):
         # Create formatted text
@@ -344,7 +343,7 @@ def plotMisclassifiedSamples(x_test, y_test_decoded, y_pred_decoded, output_dir,
         ax.text(0.05, 0.5, text,
                 transform=ax.transAxes,
                 fontsize=11,
-                family='DejaVu Sans',
+                family=fontFamily,
                 bbox=dict(facecolor='white',
                          edgecolor='gray',
                          alpha=0.9,
@@ -378,15 +377,20 @@ def plotTopMisclassifiedClasses(y_test_decoded, y_pred_decoded, label_encoder, o
     # Generate confusion matrix
     cm = confusion_matrix(y_test_decoded, y_pred_decoded)
     
-    # Calculate misclassification rates
+    # Calculate misclassification rates with error handling
     class_totals = np.sum(cm, axis=1)
     correct_predictions = np.diag(cm)
-    misclassification_rates = 1 - (correct_predictions / class_totals)
     
-    # Get top N misclassified classes
-    top_misclassified_idx = np.argsort(misclassification_rates)[-top_n:][::-1]
-    top_classes = label_encoder.classes_[top_misclassified_idx]
-    top_rates = misclassification_rates[top_misclassified_idx]
+    # Avoid division by zero and handle NaN values
+    misclassification_rates = np.zeros_like(class_totals, dtype=float)
+    mask = class_totals > 0  # Only calculate for classes with samples
+    misclassification_rates[mask] = 1 - (correct_predictions[mask] / class_totals[mask])
+    
+    # Get top N misclassified classes (excluding NaN)
+    valid_idx = ~np.isnan(misclassification_rates)
+    sorted_idx = np.argsort(misclassification_rates[valid_idx])[-top_n:][::-1]
+    top_classes = label_encoder.classes_[sorted_idx]
+    top_rates = misclassification_rates[sorted_idx]
     
     # Create figure with higher resolution
     fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
@@ -396,8 +400,18 @@ def plotTopMisclassifiedClasses(y_test_decoded, y_pred_decoded, label_encoder, o
                    color='tomato', alpha=0.8,
                    edgecolor='black', linewidth=0.5)
     
+    # Add value labels on bars with error handling
+    for i, bar in enumerate(bars):
+        width = bar.get_width()
+        if not np.isnan(width):
+            total_samples = class_totals[sorted_idx[i]]
+            wrong_samples = int(np.round(total_samples * width))
+            label = f'{width:.1%} ({wrong_samples}/{int(total_samples)})'
+            ax.text(width, bar.get_y() + bar.get_height()/2,
+                   f'  {label}', va='center', fontsize=9)
+    
     # Customize plot
-    ax.set_title(f'Top {top_n} Most Misclassified Languages',
+    ax.set_title(f'Top {len(top_classes)} Most Misclassified Languages',
                 pad=20, fontsize=14, fontweight='bold')
     ax.set_xlabel('Misclassification Rate', labelpad=10, fontsize=12)
     ax.set_ylabel('Language', labelpad=10, fontsize=12)
@@ -405,15 +419,6 @@ def plotTopMisclassifiedClasses(y_test_decoded, y_pred_decoded, label_encoder, o
     # Set y-axis ticks and labels
     ax.set_yticks(range(len(top_classes)))
     ax.set_yticklabels(top_classes, fontsize=10)
-    
-    # Add value labels on bars
-    for i, bar in enumerate(bars):
-        width = bar.get_width()
-        total_samples = class_totals[top_misclassified_idx[i]]
-        wrong_samples = int(total_samples * width)
-        label = f'{width:.1%} ({wrong_samples}/{int(total_samples)})'
-        ax.text(width, bar.get_y() + bar.get_height()/2,
-                f'  {label}', va='center', fontsize=9)
     
     # Customize grid
     ax.grid(True, axis='x', linestyle='--', alpha=0.7)
@@ -423,16 +428,25 @@ def plotTopMisclassifiedClasses(y_test_decoded, y_pred_decoded, label_encoder, o
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     
-    # Add summary statistics
+    # Add summary statistics with error handling
+    valid_rates = misclassification_rates[~np.isnan(misclassification_rates)]
     stats_text = (f'Total Classes: {len(label_encoder.classes_)}\n'
-                 f'Avg. Misclass. Rate: {np.mean(misclassification_rates):.1%}\n'
-                 f'Med. Misclass. Rate: {np.median(misclassification_rates):.1%}')
+                 f'Avg. Misclass. Rate: {np.mean(valid_rates):.1%}\n'
+                 f'Med. Misclass. Rate: {np.median(valid_rates):.1%}')
+    
     fig.text(0.98, 0.98, stats_text,
              fontsize=9, family='monospace',
-             bbox=dict(facecolor='white', edgecolor='gray', alpha=0.5))
+             bbox=dict(facecolor='white', edgecolor='gray', alpha=0.5),
+             ha='right', va='top')
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, f'top_{top_n}_misclassified_classes.png'))
+    
+    # Save figure
+    plt.savefig(os.path.join(output_dir, f'top_{top_n}_misclassified_classes.png'),
+                bbox_inches='tight',
+                pad_inches=0.5,
+                dpi=300)
+    plt.close()
 
 def main():
     setupFonts() #for plots
