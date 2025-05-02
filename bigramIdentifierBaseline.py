@@ -42,19 +42,7 @@ def loadCombineDatasets():
         'wili': {
             'train': {'x': "wili-2018/x_train.txt", 'y': "wili-2018/y_train.txt"},
             'test': {'x': "wili-2018/x_test.txt", 'y': "wili-2018/y_test.txt"}
-        },
-        'europarl': {
-            'train': {'x': "europarl-v7/x_train.txt", 'y': "europarl-v7/y_train.txt"},
-            'test': {'x': "europarl-v7/x_test.txt", 'y': "europarl-v7/y_test.txt"}
-        },
-        'tatoeba': {
-            'train': {'x': "tatoeba-sentences/x_train.txt", 'y' : "tatoeba-sentences/y_train.txt"},
-            'test': {'x': "tatoeba-sentences/x_test.txt", 'y': "tatoeba-sentences/y_test.txt"}
-        },
-        'oscar' : {
-            'train': {'x': "oscar-data/x_train.txt", 'y' : "oscar-data/y_train.txt"},
-            'test': {'x': "oscar-data/x_test.txt", 'y': "oscar-data/y_test.txt"}
-        }   
+        },  
     }
     
     x_train_combined = []
@@ -194,9 +182,9 @@ def plotResults(y_test_encoded, y_pred, label_encoder, languages, output_dir, ch
         plt.yticks(rotation=0, fontsize=10)
         
         plt.tight_layout()
-        fig_cm.savefig(os.path.join(output_dir, f'confusion_matrix_chunk_{i+1}.png'), 
-                      bbox_inches='tight', 
-                      pad_inches=0.5)
+        fig_cm.savefig(os.path.join(output_dir, f'baseline_confusion_matrix_chunk_{i+1}.png'),
+                    bbox_inches='tight', 
+                    pad_inches=0.5)
         plt.close(fig_cm)
         
         # Plot Metrics
@@ -218,9 +206,9 @@ def plotResults(y_test_encoded, y_pred, label_encoder, languages, output_dir, ch
         plt.yticks(rotation=0, fontsize=10)
         
         plt.tight_layout()
-        fig_metrics.savefig(os.path.join(output_dir, f'metrics_chunk_{i+1}.png'), 
-                          bbox_inches='tight', 
-                          pad_inches=0.5)
+        fig_metrics.savefig(os.path.join(output_dir, f'baseline_metrics_chunk_{i+1}.png'),
+                        bbox_inches='tight', 
+                        pad_inches=0.5)
         plt.close(fig_metrics)
 
 def plotTopClasses(y_test_decoded, y_pred_decoded, label_encoder, languages, metric='f1-score'):
@@ -255,7 +243,7 @@ def plotTopClasses(y_test_decoded, y_pred_decoded, label_encoder, languages, met
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     
     plt.tight_layout()
-    plt.savefig('top_25_classes_by_' + metric + '.png',
+    plt.savefig(f'baseline_top_25_classes_by_{metric}.png',
                 bbox_inches='tight',
                 pad_inches=0.5)
     plt.close()
@@ -296,7 +284,16 @@ def plotClassDistribution(y_train, y_test, label_encoder, output_dir):
                     f'{int(height):,}',
                     ha='center', va='bottom', fontsize=8)
     
-    # Plot test data  
+    # Plot test data
+    test_bars = axes[1].bar(range(len(all_classes)), 
+                           [test_class_counts.get(c, 0) for c in all_classes],
+                           color='lightcoral', **bar_params)
+    axes[1].set_title('Class Distribution in Test Data', 
+                     pad=20, fontsize=14, fontweight='bold')
+    axes[1].set_xlabel('Language', labelpad=10, fontsize=12)
+    axes[1].set_ylabel('Number of Samples', labelpad=10, fontsize=12)
+    axes[1].set_xticks(range(len(all_classes)))
+    axes[1].set_xticklabels(all_classes, rotation=45, ha='right')
     test_bars = axes[1].bar(range(len(all_classes)), 
                            [test_class_counts.get(c, 0) for c in all_classes],
                            color='lightcoral', **bar_params)
@@ -316,7 +313,7 @@ def plotClassDistribution(y_train, y_test, label_encoder, output_dir):
 
     # Adjust layout and save figure
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'class_distribution.png'),
+    plt.savefig(os.path.join(output_dir, 'baseline_class_distribution.png'),
                 bbox_inches='tight',
                 pad_inches=0.5,
                 dpi=300)
@@ -328,7 +325,7 @@ def plotClassDistribution(y_train, y_test, label_encoder, output_dir):
         'Test Samples': [test_class_counts.get(c, 0) for c in all_classes]
     }, index=all_classes)
     
-    distribution_data.to_csv(os.path.join(output_dir, 'class_distribution.csv'))
+    distribution_data.to_csv(os.path.join(output_dir, 'baseline_class_distribution.csv'))
 
 def plotMisclassifiedSamples(x_test, y_test_decoded, y_pred_decoded, output_dir, num_samples=10):
     # Find misclassified samples
@@ -395,13 +392,13 @@ def plotMisclassifiedSamples(x_test, y_test_decoded, y_pred_decoded, output_dir,
                  y=0.98)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'misclassified_samples.png'),
+    plt.savefig(os.path.join(output_dir, 'baseline_misclassified_samples.png'),
                 bbox_inches='tight',
                 pad_inches=0.5,
                 dpi=300)
     plt.close()
     
-    report_path = os.path.join(output_dir, 'misclassification_report.txt')
+    report_path = os.path.join(output_dir, 'baseline_misclassification_report.txt')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write("Misclassification Analysis Report\n")
         f.write("=" * 50 + "\n\n")
@@ -477,8 +474,7 @@ def plotTopMisclassifiedClasses(y_test_decoded, y_pred_decoded, label_encoder, o
     
     plt.tight_layout()
     
-    # Save figure
-    plt.savefig(os.path.join(output_dir, f'top_{top_n}_misclassified_classes.png'),
+    plt.savefig(os.path.join(output_dir, f'baseline_top_{top_n}_misclassified_classes.png'),
                 bbox_inches='tight',
                 pad_inches=0.5,
                 dpi=300)
@@ -488,7 +484,7 @@ def main():
     setupFonts() #for plots
 
     # Initialize the Dask Client and Cluster
-    output_dir = "results"
+    output_dir = "results_baseline"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
@@ -650,7 +646,7 @@ def main():
 
         # Save captured output
         sys.stdout = old_stdout
-        with open(os.path.join(output_dir, f'evaluation_results.txt'), 'w') as f:
+        with open(os.path.join(output_dir, 'baseline_evaluation_results.txt'), 'w') as f:
             f.write(output_capture.getvalue())
 
         plotResults(y_test_encoded, y_pred, label_encoder, label_encoder.classes_, output_dir)
