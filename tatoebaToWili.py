@@ -19,7 +19,7 @@ def processTatoeba(
     for lang in languages:
         subset = df[df["lang"] == lang].dropna()
         if len(subset) < samples_per_lang:
-            print(f"⚠️ Not enough samples for language {lang}. Found: {len(subset)}")
+            print(f"Not enough samples for language {lang}. Found: {len(subset)}")
             continue
         sampled = subset.sample(n=samples_per_lang, random_state=seed)
         data.extend(zip(sampled["sentence"].tolist(), sampled["lang"].tolist()))
